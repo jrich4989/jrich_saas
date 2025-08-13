@@ -65,8 +65,7 @@ export interface Matching {
   exclude_from_print: boolean | null;
 }
 
-// ============ 조합/확장 타입 ============
-
+// 조합된 타입 (매칭과 매물 정보)
 export interface MatchingWithProperty extends Matching {
   property: Property | null;
 }
@@ -75,6 +74,15 @@ export interface MatchingWithProperty extends Matching {
 export type RawMatchingRow = Matching & { 
   property: Property | Property[] | null 
 };
+
+// fetchProperties 함수용 타입
+export interface FetchPropsArgs {
+  page: number;
+  pageSize: number;
+  keyword?: string;
+  orderBy?: 'received_at' | 'area' | 'deposit' | 'rent';
+  asc?: boolean;
+}
 
 // ============ 유틸리티 타입 ============
 
