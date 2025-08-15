@@ -1,312 +1,373 @@
-// src/app/match/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useCallback, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 import {
-  MessageCircle,
-  Clock,
-  MapPin,
-  Users,
-  Sparkles,
-  CheckCircle2,
-  ArrowRight,
-} from "lucide-react";
-import { motion } from "framer-motion";
-import confetti from "canvas-confetti";
+  fetchProperties as fetchPropertyPage,
+  type FetchPropsArgs,
+} from "@/lib/fetchProperties";
+import { useDebounce } from "@/hooks/useDebounce";
 
-interface MatchedUser {
-  id: string;
-  nickname: string;
-  mbti: string;
-  interests: string[];
-  location: string;
-  ageGroup: string;
-  matchingRate: number;
-}
+// 컴포넌트 import
+import SaveBar from "@/components/match/SaveBar";
+import FounderSelector from "@/components/match/FounderSelector";
+import RecommendedList from "@/components/match/RecommendedList";
+import PropertyList from "@/components/match/PropertyList";
 
-interface MatchInfo {
-  matchId: string;
-  chatRoomId: string;
-  expiresAt: string;
-  partner: MatchedUser;
-}
+// 타입 import (services/types.ts 사용)
+import type {
+  Founder,
+  Property,
+  MatchingWithProperty,
+  RawMatchingRow,
+} from "@/services/types";
 
-export default function MatchFoundPage({
-  searchParams,
-}: {
-  searchParams: { matchId?: string };
-}) {
-  const router = useRouter();
-  const matchId = searchParams?.matchId;
+// OrderBy 타입 추출
+type OrderByField = NonNullable<FetchPropsArgs["orderBy"]>;
 
-  const [matchInfo, setMatchInfo] = useState<MatchInfo | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+export default function MatchPage() {
+  // ===== State 관리 =====
+  const [founder, setFounder] = useState<Founder | null>(null);
+  const [founderLoading, setFounderLoading] = useState(false);
 
+  const [recommended, setRecommended] = useState<MatchingWithProperty[]>([]);
+  const [recommendedLoading, setRecommendedLoading] = useState(false);
+
+  const [properties, setProperties] = useState<Property[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+
+  const [selectedPropertyIds, setSelectedPropertyIds] = useState<number[]>([]);
+
+  // 페이지네이션 & 검색
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [searchText, setSearchText] = useState("");
+  const [keyword, setKeyword] = useState("");
+  const [orderBy, setOrderBy] = useState<OrderByField>("received_at");
+  const [asc, setAsc] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+
+  // ===== 검색 디바운스 =====
+  const applyKeyword = useCallback((value: string) => {
+    setPage(1);
+    setKeyword(value);
+  }, []);
+
+  const onChangeKeyword = useDebounce(applyKeyword, 300);
+
+  // ===== 창업자 관련 함수 =====
+  const fetchFounder = useCallback(async (founderId: number) => {
+    setFounderLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("founders")
+        .select("*")
+        .eq("founder_id", founderId)
+        .maybeSingle();
+
+      if (error) throw error;
+      setFounder(data as Founder | null);
+    } catch (e) {
+      console.error(e);
+      alert("창업자 조회 실패");
+      setFounder(null);
+    } finally {
+      setFounderLoading(false);
+    }
+  }, []);
+
+  // ===== 추천 매물 관련 함수 =====
+  const fetchRecommended = useCallback(async (founderId: number) => {
+    setRecommendedLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("matchings")
+        .select(
+          `
+          matching_id, founder_id, property_id, matched_at, 
+          method, status, score, is_favorite, exclude_from_print,
+          property:properties(*)
+        `
+        )
+        .eq("founder_id", founderId)
+        .order("matched_at", { ascending: false })
+        .returns<RawMatchingRow[]>();
+
+      if (error) throw error;
+
+      // 배열 정규화
+      const rows: MatchingWithProperty[] = (data ?? []).map((r) => ({
+        ...r,
+        property: Array.isArray(r.property)
+          ? r.property[0] ?? null
+          : r.property ?? null,
+      }));
+
+      setRecommended(rows);
+    } catch (e) {
+      console.error(e);
+      alert("추천된 매물 목록 조회 실패");
+      setRecommended([]);
+    } finally {
+      setRecommendedLoading(false);
+    }
+  }, []);
+
+  // ===== 매물 목록 조회 =====
   useEffect(() => {
-    if (!matchId) {
-      router.push("/");
+    let cancelled = false;
+
+    const loadProperties = async () => {
+      try {
+        setListLoading(true);
+        const { items, total, totalPages } = await fetchPropertyPage({
+          page,
+          pageSize,
+          keyword,
+          orderBy,
+          asc,
+        });
+
+        if (!cancelled) {
+          setProperties(items);
+          setTotalCount(total);
+          setTotalPages(totalPages);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          console.error(e);
+          alert("매물 목록 불러오기 실패");
+        }
+      } finally {
+        if (!cancelled) {
+          setListLoading(false);
+        }
+      }
+    };
+
+    loadProperties();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [page, pageSize, keyword, orderBy, asc]);
+
+  // ===== 창업자 변경시 초기화 =====
+  useEffect(() => {
+    setSelectedPropertyIds([]);
+    if (founder?.founder_id) {
+      fetchRecommended(founder.founder_id);
+      setPage(1);
+    }
+  }, [founder?.founder_id, fetchRecommended]);
+
+  // ===== 이벤트 핸들러 =====
+  const toggleSelect = (propertyId: number) => {
+    setSelectedPropertyIds((prev) =>
+      prev.includes(propertyId)
+        ? prev.filter((x) => x !== propertyId)
+        : [...prev, propertyId]
+    );
+  };
+
+  const saveRecommendations = async () => {
+    if (!founder?.founder_id) {
+      alert("창업자를 먼저 선택하세요.");
+      return;
+    }
+    if (selectedPropertyIds.length === 0) {
+      alert("선택된 매물이 없습니다.");
       return;
     }
 
-    // 매칭 정보 조회
-    fetchMatchInfo();
+    const payload = selectedPropertyIds.map((id) => ({
+      founder_id: founder.founder_id,
+      property_id: id,
+      matched_at: new Date().toISOString(),
+      method: "자동",
+      status: "추천",
+      score: 0,
+      is_favorite: false,
+      exclude_from_print: false,
+    }));
 
-    // 축하 효과
-    triggerCelebration();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [matchId]);
+    const { error } = await supabase.from("matchings").upsert(payload, {
+      onConflict: "founder_id,property_id",
+      ignoreDuplicates: true,
+    });
 
-  useEffect(() => {
-    if (!matchInfo) return;
+    if (error) {
+      console.error(error);
+      alert("추천 저장 실패");
+      return;
+    }
 
-    // 남은 시간 계산
-    const timer = setInterval(() => {
-      const now = new Date().getTime();
-      const expires = new Date(matchInfo.expiresAt).getTime();
-      const distance = expires - now;
+    setSelectedPropertyIds([]);
+    if (founder?.founder_id) {
+      fetchRecommended(founder.founder_id);
+    }
+    alert("추천 저장 완료");
+  };
 
-      if (distance < 0) {
-        setTimeRemaining("만료됨");
-        clearInterval(timer);
-        return;
-      }
+  const cancelRecommendation = async (propertyId: number) => {
+    if (!founder?.founder_id) return;
 
-      const hours = Math.floor(distance / (1000 * 60 * 60));
-      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+    const { error } = await supabase
+      .from("matchings")
+      .delete()
+      .match({ founder_id: founder.founder_id, property_id: propertyId });
 
-      setTimeRemaining(`${hours}시간 ${minutes}분 ${seconds}초`);
-    }, 1000);
+    if (error) {
+      console.error(error);
+      alert("추천 취소 실패");
+      return;
+    }
 
-    return () => clearInterval(timer);
-  }, [matchInfo]);
-
-  const fetchMatchInfo = async () => {
-    try {
-      // TODO: 실제 API 호출
-      // const response = await fetch(`/api/match/${matchId}`);
-      // const data = await response.json();
-
-      // 임시 데이터
-      setTimeout(() => {
-        setMatchInfo({
-          matchId: matchId!,
-          chatRoomId: "chat_" + matchId,
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-          partner: {
-            id: "user_456",
-            nickname: "별빛러너",
-            mbti: "ENFP",
-            interests: ["운동", "여행", "카페투어", "독서"],
-            location: "서울 강남구",
-            ageGroup: "20대 후반",
-            matchingRate: 87,
-          },
-        });
-        setLoading(false);
-      }, 1000);
-    } catch (error) {
-      console.error("Failed to fetch match info:", error);
-      setLoading(false);
+    if (founder?.founder_id) {
+      fetchRecommended(founder.founder_id);
     }
   };
 
-  const triggerCelebration = () => {
-    // 컨페티 효과
-    setTimeout(() => {
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-      });
-    }, 500);
-  };
+  const toggleFlag = async (
+    matchingId: number,
+    field: "is_favorite" | "exclude_from_print"
+  ) => {
+    const row = recommended.find((r) => r.matching_id === matchingId);
+    if (!row) return;
 
-  const handleStartChat = () => {
-    if (matchInfo) {
-      router.push(`/chat/${matchInfo.chatRoomId}`);
+    const next = !(row[field] ?? false);
+    const { error } = await supabase
+      .from("matchings")
+      .update({ [field]: next })
+      .eq("matching_id", matchingId);
+
+    if (error) {
+      console.error(error);
+      alert("상태 변경 실패");
+      return;
     }
+
+    setRecommended((prev) =>
+      prev.map((r) =>
+        r.matching_id === matchingId ? { ...r, [field]: next } : r
+      )
+    );
   };
 
-  const handleDeclineMatch = () => {
-    // TODO: 매칭 거절 API 호출
-    router.push("/");
-  };
+  // ===== 렌더링 =====
+  return (
+    <div className="max-w-6xl mx-auto p-5">
+      <h1 className="text-3xl font-bold mb-4">매물 추천</h1>
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <Sparkles className="w-12 h-12 mx-auto mb-4 text-purple-500 animate-pulse" />
-          <p className="text-gray-600">매칭 정보를 불러오는 중...</p>
+      <SaveBar
+        disabled={!founder || selectedPropertyIds.length === 0}
+        count={selectedPropertyIds.length}
+        onSave={saveRecommendations}
+        onClear={() => setSelectedPropertyIds([])}
+      />
+
+      <FounderSelector
+        founder={founder}
+        loading={founderLoading}
+        onSelect={fetchFounder}
+      />
+
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-xl font-semibold">
+            추천된 매물 ({recommended.length}건)
+          </h2>
+        </div>
+
+        <RecommendedList
+          items={recommended}
+          loading={recommendedLoading}
+          onToggleFavorite={(id) => toggleFlag(id, "is_favorite")}
+          onToggleExclude={(id) => toggleFlag(id, "exclude_from_print")}
+          onCancel={cancelRecommendation}
+        />
+      </div>
+
+      {/* 검색 컨트롤 */}
+      <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b py-2 px-3 mb-3 flex flex-wrap gap-2 items-center">
+        <input
+          type="text"
+          placeholder="매물 검색(상호/주소/메모/코드)"
+          className="border rounded px-3 py-2 w-64"
+          value={searchText}
+          onChange={(e) => {
+            const v = e.target.value;
+            setSearchText(v);
+            onChangeKeyword(v);
+          }}
+        />
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-500">정렬</label>
+          <select
+            className="border rounded px-2 py-2"
+            value={orderBy}
+            onChange={(e) => {
+              setOrderBy(e.target.value as OrderByField);
+              setPage(1);
+            }}
+          >
+            <option value="received_at">최신순</option>
+            <option value="area">면적</option>
+            <option value="deposit">보증금</option>
+            <option value="rent">월세</option>
+          </select>
+          <button
+            className="border rounded px-2 py-2"
+            onClick={() => setAsc((a) => !a)}
+          >
+            {asc ? "▲" : "▼"}
+          </button>
+        </div>
+
+        <div className="ml-auto text-sm text-gray-600">
+          총 {totalCount.toLocaleString()}건 / {page} / {totalPages}페이지
         </div>
       </div>
-    );
-  }
 
-  if (!matchInfo) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Card className="w-full max-w-md">
-          <CardContent className="pt-6 text-center">
-            <p className="text-gray-600">매칭 정보를 찾을 수 없습니다.</p>
-            <Button onClick={() => router.push("/")} className="mt-4">
-              홈으로 돌아가기
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+      {/* 후보 매물 목록 */}
+      <PropertyList
+        properties={properties}
+        selectedIds={selectedPropertyIds}
+        loading={listLoading}
+        onToggleSelect={toggleSelect}
+      />
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-blue-50 p-4">
-      <div className="max-w-2xl mx-auto pt-8">
-        <motion.div
-          initial={{ scale: 0.9, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ duration: 0.5 }}
+      {/* 페이지네이션 */}
+      <div className="flex items-center justify-center gap-2 my-4">
+        <button
+          className="border rounded px-3 py-2 disabled:opacity-50"
+          disabled={page <= 1}
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
         >
-          {/* 성공 메시지 */}
-          <div className="text-center mb-8">
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-              className="inline-flex items-center justify-center w-20 h-20 bg-green-100 rounded-full mb-4"
-            >
-              <CheckCircle2 className="w-10 h-10 text-green-600" />
-            </motion.div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
-              매칭 성공! 🎉
-            </h1>
-            <p className="text-gray-600">새로운 대화 상대를 찾았습니다</p>
-          </div>
+          이전
+        </button>
 
-          {/* 매칭 상대 정보 */}
-          <Card className="mb-6 border-2 border-purple-200 shadow-xl">
-            <CardHeader className="pb-4">
-              <div className="flex items-center justify-between">
-                <CardTitle>매칭 상대</CardTitle>
-                <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white">
-                  {matchInfo.partner.matchingRate}% 일치
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-start space-x-4">
-                <Avatar className="w-16 h-16">
-                  <AvatarFallback className="bg-gradient-to-br from-purple-400 to-pink-400 text-white text-xl">
-                    {matchInfo.partner.nickname[0]}
-                  </AvatarFallback>
-                </Avatar>
+        <input
+          type="number"
+          value={page}
+          min={1}
+          max={totalPages}
+          onChange={(e) =>
+            setPage(Math.min(Math.max(1, Number(e.target.value)), totalPages))
+          }
+          className="w-16 text-center border rounded px-2 py-2"
+        />
+        <span className="text-sm">/ {totalPages}</span>
 
-                <div className="flex-1">
-                  <h3 className="text-xl font-semibold mb-2">
-                    {matchInfo.partner.nickname}
-                  </h3>
-
-                  <div className="space-y-2 text-sm">
-                    <div className="flex items-center text-gray-600">
-                      <Users className="w-4 h-4 mr-2" />
-                      <span className="font-medium">
-                        {matchInfo.partner.mbti}
-                      </span>
-                      <span className="mx-2">•</span>
-                      <span>{matchInfo.partner.ageGroup}</span>
-                    </div>
-
-                    <div className="flex items-center text-gray-600">
-                      <MapPin className="w-4 h-4 mr-2" />
-                      <span>{matchInfo.partner.location}</span>
-                    </div>
-                  </div>
-
-                  <div className="mt-3">
-                    <p className="text-xs text-gray-500 mb-2">관심사</p>
-                    <div className="flex flex-wrap gap-2">
-                      {matchInfo.partner.interests.map((interest, index) => (
-                        <Badge key={index} variant="secondary">
-                          {interest}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* 시간 정보 */}
-              <div className="mt-6 p-4 bg-amber-50 rounded-lg border border-amber-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center text-amber-700">
-                    <Clock className="w-5 h-5 mr-2" />
-                    <span className="font-medium">대화 가능 시간</span>
-                  </div>
-                  <span className="font-bold text-amber-900">
-                    {timeRemaining}
-                  </span>
-                </div>
-                <p className="text-xs text-amber-600 mt-2">
-                  24시간 동안 대화할 수 있습니다. 시간이 지나면 자동으로
-                  종료됩니다.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* 액션 버튼 */}
-          <div className="space-y-3">
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.3 }}
-            >
-              <Button
-                onClick={handleStartChat}
-                className="w-full h-14 text-lg bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
-              >
-                <MessageCircle className="w-5 h-5 mr-2" />
-                대화 시작하기
-                <ArrowRight className="w-5 h-5 ml-2" />
-              </Button>
-            </motion.div>
-
-            <motion.div
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.4 }}
-            >
-              <Button
-                onClick={handleDeclineMatch}
-                variant="outline"
-                className="w-full"
-              >
-                다음 기회에
-              </Button>
-            </motion.div>
-          </div>
-
-          {/* 안내 사항 */}
-          <Card className="mt-6 bg-blue-50 border-blue-200">
-            <CardContent className="pt-6">
-              <h4 className="font-semibold text-blue-900 mb-2 flex items-center">
-                <Sparkles className="w-4 h-4 mr-2" />
-                대화 팁
-              </h4>
-              <ul className="space-y-1 text-sm text-blue-700">
-                <li>• 서로를 존중하며 즐거운 대화를 나눠보세요</li>
-                <li>• 개인정보는 신중하게 공유하세요</li>
-                <li>• 불편한 상황이 발생하면 신고 기능을 이용해주세요</li>
-              </ul>
-            </CardContent>
-          </Card>
-        </motion.div>
+        <button
+          className="border rounded px-3 py-2 disabled:opacity-50"
+          disabled={page >= totalPages}
+          onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+        >
+          다음
+        </button>
       </div>
     </div>
   );
