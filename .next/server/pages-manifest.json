@@ -2,6 +2,6 @@
   "/_app": "pages/_app.js",
   "/_error": "pages/_error.js",
   "/_document": "pages/_document.js",
-  "/properties/create": "pages/properties/create.js",
-  "/match": "pages/match.js"
+  "/properties": "pages/properties.js",
+  "/match/create": "pages/match/create.js"
 }

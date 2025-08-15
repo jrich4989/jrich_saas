@@ -7,7 +7,10 @@ globalThis.__BUILD_MANIFEST = {
   ],
   "ampDevFiles": [],
   "lowPriorityFiles": [],
-  "rootMainFiles": [],
+  "rootMainFiles": [
+    "static/chunks/webpack.js",
+    "static/chunks/main-app.js"
+  ],
   "rootMainFilesTree": {},
   "pages": {
     "/_app": [
@@ -20,15 +23,15 @@ globalThis.__BUILD_MANIFEST = {
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/match": [
+    "/match/create": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/match.js"
+      "static/chunks/pages/match/create.js"
     ],
-    "/properties/create": [
+    "/properties": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/properties/create.js"
+      "static/chunks/pages/properties.js"
     ]
   },
   "ampFirstPages": []
