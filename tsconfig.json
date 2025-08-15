@@ -23,6 +23,6 @@
     "**/*.ts",
     "**/*.tsx",
     "src/**/*"
-  ],
+, "next.config.js"  ],
   "exclude": ["node_modules"]
 }

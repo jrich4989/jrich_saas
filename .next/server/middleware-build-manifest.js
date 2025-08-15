@@ -20,10 +20,10 @@ globalThis.__BUILD_MANIFEST = {
       "static/chunks/main.js",
       "static/chunks/pages/_error.js"
     ],
-    "/match/match": [
+    "/properties": [
       "static/chunks/webpack.js",
       "static/chunks/main.js",
-      "static/chunks/pages/match/match.js"
+      "static/chunks/pages/properties.js"
     ]
   },
   "ampFirstPages": []
