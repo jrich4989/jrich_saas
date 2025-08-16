@@ -11,7 +11,6 @@ import { useDebounce } from "@/hooks/useDebounce";
 // 컴포넌트 import
 import SaveBar from "@/components/match/SaveBar";
 import FounderSelector from "@/components/match/FounderSelector";
-import PropertyFilter from "@/components/match/PropertyFilter"; // ✅ 추가
 import RecommendedList from "@/components/match/RecommendedList";
 import PropertyList from "@/components/match/PropertyList";
 
@@ -19,7 +18,7 @@ import PropertyList from "@/components/match/PropertyList";
 import type {
   Founder,
   Property,
-  PropertyFilter as PropertyFilterType, // ✅ 타입 추가
+  PropertyFilter,
   MatchingWithProperty,
   RawMatchingRow,
 } from "@/services/types";
@@ -49,9 +48,6 @@ export default function MatchPage() {
   const [asc, setAsc] = useState(false);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
-
-  // ✅ 필터 state 추가
-  const [filter, setFilter] = useState<PropertyFilterType>({});
 
   // ===== 검색 디바운스 =====
   const applyKeyword = useCallback((value: string) => {
@@ -132,7 +128,6 @@ export default function MatchPage() {
           keyword,
           orderBy,
           asc,
-          filter, // ✅ filter 전달
         });
 
         if (!cancelled) {
@@ -157,7 +152,7 @@ export default function MatchPage() {
     return () => {
       cancelled = true;
     };
-  }, [page, pageSize, keyword, orderBy, asc, filter]); // ✅ filter 의존성 추가
+  }, [page, pageSize, keyword, orderBy, asc]);
 
   // ===== 창업자 변경시 초기화 =====
   useEffect(() => {
@@ -261,17 +256,6 @@ export default function MatchPage() {
     );
   };
 
-  // ✅ 필터 핸들러 추가
-  const handleApplyFilter = () => {
-    setPage(1);
-    // filter state가 변경되면 useEffect가 자동으로 실행됨
-  };
-
-  const handleResetFilter = () => {
-    setFilter({});
-    setPage(1);
-  };
-
   // ===== 렌더링 =====
   return (
     <div className="max-w-6xl mx-auto p-5">
@@ -305,14 +289,6 @@ export default function MatchPage() {
           onCancel={cancelRecommendation}
         />
       </div>
-
-      {/* ✅ PropertyFilter 컴포넌트 추가 (여기!) */}
-      <PropertyFilter
-        filter={filter}
-        onFilterChange={setFilter}
-        onApply={handleApplyFilter}
-        onReset={handleResetFilter}
-      />
 
       {/* 검색 컨트롤 */}
       <div className="sticky top-0 z-10 bg-white/90 backdrop-blur border-b py-2 px-3 mb-3 flex flex-wrap gap-2 items-center">
