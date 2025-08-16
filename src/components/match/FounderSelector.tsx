@@ -1,3 +1,5 @@
+// FounderSelector.tsx 상단 부분만 수정
+
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
@@ -23,9 +25,6 @@ export default function FounderSelector({
   const [recentFounders, setRecentFounders] = useState<Founder[]>([]);
   const [activeTab, setActiveTab] = useState<"search" | "recent">("recent");
 
-  // 검색어 디바운스
-  const debouncedSearch = useDebounce(searchTerm, 300);
-
   // 창업자 검색 (contact 필드 사용)
   const searchFounders = useCallback(async (term: string) => {
     if (!term.trim()) {
@@ -34,6 +33,8 @@ export default function FounderSelector({
     }
 
     setSearching(true);
+    setActiveTab("search"); // 검색 시 탭 전환
+
     try {
       const { data, error } = await supabase
         .from("founders")
@@ -53,6 +54,18 @@ export default function FounderSelector({
       setSearching(false);
     }
   }, []);
+
+  // ✅ 기존 useDebounce 사용 방식
+  const debouncedSearch = useDebounce(searchFounders, 300);
+
+  // 검색어 변경 시 디바운스된 검색 실행
+  useEffect(() => {
+    if (searchTerm) {
+      debouncedSearch(searchTerm);
+    } else {
+      setFounders([]);
+    }
+  }, [searchTerm, debouncedSearch]);
 
   // 최근 선택한 창업자 불러오기
   const loadRecentFounders = useCallback(async () => {
@@ -81,16 +94,6 @@ export default function FounderSelector({
       console.error("최근 창업자 불러오기 실패:", error);
     }
   }, []);
-
-  // 검색어 변경 시
-  useEffect(() => {
-    if (debouncedSearch) {
-      searchFounders(debouncedSearch);
-      setActiveTab("search");
-    } else {
-      setFounders([]);
-    }
-  }, [debouncedSearch, searchFounders]);
 
   // 컴포넌트 마운트 시
   useEffect(() => {
